@@ -1,4 +1,7 @@
-include Makefile.common
+root ?= .
+include $(root)/Makefile.common
+
+VPATH = $(root)
 
 RPMBUILD=$(shell `which rpmbuild >&/dev/null` && echo "rpmbuild" || echo "rpm")
 
@@ -11,11 +14,11 @@ all:
 	@$(MAKE) -C test
 	@$(MAKE) -C examples
 
-.PHONY: all install default clean test
-.PHONY: FORCE cscope
+library:
+	@$(MAKE) -C src
 
-partcheck: all
-	@echo "make partcheck => TODO add tests with out kernel support"
+.PHONY: all install default clean test library
+.PHONY: FORCE cscope
 
 runtests: all
 	@$(MAKE) -C test runtests
@@ -24,10 +27,10 @@ runtests-loop: all
 runtests-parallel: all
 	@$(MAKE) -C test runtests-parallel
 
-config-host.mak: configure
-	@if [ ! -e "$@" ]; then					\
+config-host.mak: $(root)/configure
+	+@if [ ! -e "$@" ]; then				\
 	  echo "Running configure ...";				\
-	  ./configure;						\
+	  $(root)/configure;				\
 	else							\
 	  echo "$@ is out-of-date, running configure";		\
 	  sed -n "/.*Configured with/s/[^:]*: //p" "$@" | sh;	\
@@ -45,25 +48,37 @@ endif
 	    -e "s%@VERSION@%$(VERSION)%g" \
 	    $< >$@
 
-install: $(NAME).pc
+install: $(NAME).pc $(NAME)-ffi.pc
 	@$(MAKE) -C src install prefix=$(DESTDIR)$(prefix) \
 		includedir=$(DESTDIR)$(includedir) \
 		libdir=$(DESTDIR)$(libdir) \
 		libdevdir=$(DESTDIR)$(libdevdir) \
 		relativelibdir=$(relativelibdir)
 	$(INSTALL) -D -m 644 $(NAME).pc $(DESTDIR)$(libdevdir)/pkgconfig/$(NAME).pc
+	$(INSTALL) -D -m 644 $(NAME)-ffi.pc $(DESTDIR)$(libdevdir)/pkgconfig/$(NAME)-ffi.pc
 	$(INSTALL) -m 755 -d $(DESTDIR)$(mandir)/man2
-	$(INSTALL) -m 644 man/*.2 $(DESTDIR)$(mandir)/man2
+	$(INSTALL) -m 644 $(root)/man/*.2 $(DESTDIR)$(mandir)/man2
 	$(INSTALL) -m 755 -d $(DESTDIR)$(mandir)/man3
-	$(INSTALL) -m 644 man/*.3 $(DESTDIR)$(mandir)/man3
+	$(INSTALL) -m 644 $(root)/man/*.3 $(DESTDIR)$(mandir)/man3
 	$(INSTALL) -m 755 -d $(DESTDIR)$(mandir)/man7
-	$(INSTALL) -m 644 man/*.7 $(DESTDIR)$(mandir)/man7
+	$(INSTALL) -m 644 $(root)/man/*.7 $(DESTDIR)$(mandir)/man7
+
+uninstall:
+	@$(MAKE) -C src uninstall prefix=$(DESTDIR)$(prefix) datadir=$(DESTDIR)$(datadir)
+	@rm -f $(DESTDIR)$(libdevdir)/pkgconfig/$(NAME).pc
+	@rm -f $(DESTDIR)$(libdevdir)/pkgconfig/$(NAME)-ffi.pc
+	@rm -rf $(DESTDIR)$(mandir)/man2/io_uring*.2
+	@rm -rf $(DESTDIR)$(mandir)/man3/io_uring*.3
+	@rm -rf $(DESTDIR)$(mandir)/man7/io_uring*.7
 
 install-tests:
 	@$(MAKE) -C test install prefix=$(DESTDIR)$(prefix) datadir=$(DESTDIR)$(datadir)
 
+uninstall-tests:
+	@$(MAKE) -C test uninstall prefix=$(DESTDIR)$(prefix) datadir=$(DESTDIR)$(datadir)
+
 clean:
-	@rm -f config-host.mak config-host.h cscope.out $(NAME).pc test/*.dmesg
+	@rm -f config-host.mak config-host.h cscope.out $(NAME).pc $(NAME)-ffi.pc test/*.dmesg
 	@$(MAKE) -C src clean
 	@$(MAKE) -C test clean
 	@$(MAKE) -C examples clean

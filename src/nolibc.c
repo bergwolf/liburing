@@ -7,15 +7,41 @@
 #include "lib.h"
 #include "syscall.h"
 
-void *memset(void *s, int c, size_t n)
+void *__uring_memset(void *s, int c, size_t n)
 {
 	size_t i;
 	unsigned char *p = s;
 
-	for (i = 0; i < n; i++)
+	for (i = 0; i < n; i++) {
 		p[i] = (unsigned char) c;
 
+		/*
+		 * An empty inline ASM to avoid auto-vectorization
+		 * because it's too bloated for liburing.
+		 */
+		__asm__ volatile ("");
+	}
+
 	return s;
+}
+
+int __uring_memcmp(const void *s1, const void *s2, size_t n)
+{
+	size_t i;
+	const unsigned char *p1 = s1, *p2 = s2;
+
+	for (i = 0; i < n; i++) {
+		if (p1[i] != p2[i])
+			return p1[i] - p2[i];
+
+		/*
+		 * An empty inline ASM to avoid auto-vectorization
+		 * because it's too bloated for liburing.
+		 */
+		__asm__ volatile ("");
+	}
+
+	return 0;
 }
 
 struct uring_heap {
@@ -26,13 +52,18 @@ struct uring_heap {
 void *__uring_malloc(size_t len)
 {
 	struct uring_heap *heap;
+	size_t total = sizeof(*heap) + len;
 
-	heap = __sys_mmap(NULL, sizeof(*heap) + len, PROT_READ | PROT_WRITE,
+	/* check for overflow */
+	if (total < len)
+		return NULL;
+
+	heap = __sys_mmap(NULL, total, PROT_READ | PROT_WRITE,
 			  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	if (IS_ERR(heap))
 		return NULL;
 
-	heap->len = sizeof(*heap) + len;
+	heap->len = total;
 	return heap->user_p;
 }
 

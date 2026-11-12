@@ -4,11 +4,10 @@
 .\"
 .TH io_uring_prep_provide_buffers 3 "March 13, 2022" "liburing-2.2" "liburing Manual"
 .SH NAME
-io_uring_prep_provide_buffers  - prepare a provide buffers request
-.fi
+io_uring_prep_provide_buffers \- prepare a provide buffers request
 .SH SYNOPSIS
 .nf
-.BR "#include <liburing.h>"
+.B #include <liburing.h>
 .PP
 .BI "void io_uring_prep_provide_buffers(struct io_uring_sqe *" sqe ","
 .BI "                                   void *" addr ","
@@ -16,20 +15,24 @@ io_uring_prep_provide_buffers  - prepare a provide buffers request
 .BI "                                   int " nr ","
 .BI "                                   int " bgid ","
 .BI "                                   int " bid ");"
-.PP
+.fi
 .SH DESCRIPTION
 .PP
-The io_uring_prep_provide_buffers() function prepares a request for providing
-the kernel with buffers. The submission queue entry
+The
+.BR io_uring_prep_provide_buffers (3)
+function prepares a request for providing the kernel with buffers. The
+submission queue entry
 .I sqe
 is setup to consume
+.I nr
+number of
 .I len
-number of buffers starting at
+sized buffers starting at
 .I addr
 and identified by the buffer group ID of
 .I bgid
 and numbered sequentially starting at
-.I bid.
+.IR bid .
 
 This function sets up a request to provide buffers to the io_uring context
 that can be used by read or receive operations. This is done by filling in
@@ -63,9 +66,21 @@ and sequentially ascending from that value. If
 buffers are provided and start with an initial
 .I bid
 of 0, then the buffer IDs will range from
-.B 0..15.
+.BR 0..15 .
 The application must be aware of this to make sense of the buffer ID passed
 back in the CQE.
+
+Buffer IDs always range from
+.B 0
+to
+.B 65535 ,
+as there are only 16-bits available in the CQE to pass them back. This range
+is independent of how the buffer group initially got created. Attempting to
+add buffer IDs larger than that, or buffer IDs that will wrap when cast to
+a 16-bit value, will cause the request to fail with
+.B -E2BIG
+or
+.B -EINVAL .
 
 Not all requests support buffer selection, as it only really makes sense for
 requests that receive data from the kernel rather than write or provide data.
@@ -75,9 +90,9 @@ receive request. Attempting to use
 with a command that doesn't support it will result in a CQE
 .I res
 error of
-.B -EINVAL.
+.BR -EINVAL .
 Buffer selection will work with operations that take a
-.BR struct iovec
+.B struct iovec
 as its data destination, but only if 1 iovec is provided.
 .
 .SH RETURN VALUE
@@ -87,8 +102,9 @@ These are the errors that are reported in the CQE
 .I res
 field. On success,
 .I res
-will contain the number of successfully provided buffers. On error,
-the following errors can occur.
+will contain
+.B 0
+or the number of successfully provided buffers.
 .TP
 .B -ENOMEM
 The kernel was unable to allocate memory for the request.
@@ -106,12 +122,6 @@ buffers can be specified.
 .B -EFAULT
 Some of the user memory given was invalid for the application.
 .TP
-.B -EBADF
-On of the descriptors located in
-.I fds
-didn't refer to a valid file descriptor, or one of the file descriptors in
-the array referred to an io_uring instance.
-.TP
 .B -EOVERFLOW
 The product of
 .I len
@@ -124,4 +134,7 @@ and the length of buffers overflowed.
 .B -EBUSY
 Attempt to update a slot that is already used.
 .SH SEE ALSO
-.BR io_uring_get_sqe (3), io_uring_submit (3), io_uring_register (2), io_uring_prep_remove_buffers (3)
+.BR io_uring_get_sqe (3),
+.BR io_uring_submit (3),
+.BR io_uring_register (2),
+.BR io_uring_prep_remove_buffers (3)

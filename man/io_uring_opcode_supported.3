@@ -2,21 +2,21 @@
 .\"
 .\" SPDX-License-Identifier: LGPL-2.0-or-later
 .\"
-.TH io_uring_opcode_supported "January 25, 2022" "liburing-2.1" "liburing Manual"
+.TH io_uring_opcode_supported 3 "January 25, 2022" "liburing-2.1" "liburing Manual"
 .SH NAME
-io_uring_opcode_supported - is op code supported?
+io_uring_opcode_supported \- is op code supported?
 .SH SYNOPSIS
 .nf
-.BR "#include <liburing.h>"
+.B #include <liburing.h>
 .PP
 .BI "int io_uring_opcode_supported(struct io_uring_probe *" probe ","
 .BI "                              int " opcode ");"
 .fi
-.PP
 .SH DESCRIPTION
 .PP
-The function io_uring_opcode_supported() allows the caller to determine if
-the passed in
+The function
+.BR io_uring_opcode_supported (3)
+allows the caller to determine if the passed in
 .I opcode
 belonging to the
 .I probe

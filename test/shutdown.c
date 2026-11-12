@@ -19,6 +19,7 @@
 #include <arpa/inet.h>
 
 #include "liburing.h"
+#include "helpers.h"
 
 static void sig_pipe(int sig)
 {
@@ -29,7 +30,7 @@ int main(int argc, char *argv[])
 	int p_fd[2], ret;
 	int32_t recv_s0;
 	int32_t val = 1;
-	struct sockaddr_in addr;
+	struct sockaddr_in addr = { };
 
 	if (argc > 1)
 		return 0;
@@ -44,11 +45,10 @@ int main(int argc, char *argv[])
 	assert(ret != -1);
 
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons((rand() % 61440) + 4096);
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-	ret = bind(recv_s0, (struct sockaddr*)&addr, sizeof(addr));
-	assert(ret != -1);
+	ret = t_bind_ephemeral_port(recv_s0, &addr);
+	assert(!ret);
 	ret = listen(recv_s0, 128);
 	assert(ret != -1);
 
@@ -58,22 +58,12 @@ int main(int argc, char *argv[])
 	ret = setsockopt(p_fd[1], IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val));
 	assert(ret != -1);
 
-	int32_t flags = fcntl(p_fd[1], F_GETFL, 0);
-	assert(flags != -1);
-
-	flags |= O_NONBLOCK;
-	ret = fcntl(p_fd[1], F_SETFL, flags);
-	assert(ret != -1);
+	t_set_nonblock(p_fd[1]);
 
 	ret = connect(p_fd[1], (struct sockaddr*)&addr, sizeof(addr));
 	assert(ret == -1);
 
-	flags = fcntl(p_fd[1], F_GETFL, 0);
-	assert(flags != -1);
-
-	flags &= ~O_NONBLOCK;
-	ret = fcntl(p_fd[1], F_SETFL, flags);
-	assert(ret != -1);
+	t_clear_nonblock(p_fd[1]);
 
 	p_fd[0] = accept(recv_s0, NULL, NULL);
 	assert(p_fd[0] != -1);

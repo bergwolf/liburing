@@ -4,31 +4,33 @@
 .\"
 .TH io_uring_register_eventfd 3 "April 16, 2022" "liburing-2.2" "liburing Manual"
 .SH NAME
-io_uring_register_eventfd   - register an eventfd with a ring
-
+io_uring_register_eventfd \- register an eventfd with a ring
 .SH SYNOPSIS
 .nf
-.BR "#include <liburing.h>"
+.B #include <liburing.h>
 .PP
 .BI "int io_uring_register_eventfd(struct io_uring *" ring ","
 .BI "                              int " fd ");"
+.PP
 .BI "int io_uring_register_eventfd_async(struct io_uring *" ring ","
 .BI "                                    int " fd ");"
+.PP
 .BI "int io_uring_unregister_eventfd(struct io_uring *" ring ");"
-
+.fi
 .SH DESCRIPTION
 .PP
-io_uring_register_eventfd() registers the eventfd file descriptor
+.BR io_uring_register_eventfd (3)
+registers the eventfd file descriptor
 .I fd
 with the ring identified by
-.I ring.
+.IR ring .
 
 Whenever completions are posted to the CQ ring, an eventfd notification
 is generated with the registered eventfd descriptor. If
 .BR io_uring_register_eventfd_async (3)
 is used, only events that completed out-of-line will trigger a notification.
 
-It notifications are no longer desired,
+If notifications are no longer desired,
 .BR io_uring_unregister_eventfd (3)
 may be called to remove the eventfd registration. No eventfd argument is
 needed, as a ring can only have a single eventfd registered.
@@ -42,8 +44,7 @@ eventfd notifications posted. An eventfd notification must thus only be treated
 as a hint to check the CQ ring for completions.
 .SH RETURN VALUE
 Returns 0 on success, or
-or
-.B -errno
+.BR -errno
 on error.
 .SH SEE ALSO
 .BR eventfd (2)

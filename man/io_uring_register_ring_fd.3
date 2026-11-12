@@ -4,17 +4,17 @@
 .\"
 .TH io_uring_register_ring_fd 3 "March 11, 2022" "liburing-2.2" "liburing Manual"
 .SH NAME
-io_uring_register_ring_fd   - register a ring file descriptor
-
+io_uring_register_ring_fd \- register a ring file descriptor
 .SH SYNOPSIS
 .nf
-.BR "#include <liburing.h>"
+.B #include <liburing.h>
 .PP
 .BI "int io_uring_register_ring_fd(struct io_uring *" ring ");"
-
+.fi
 .SH DESCRIPTION
 .PP
-io_uring_register_ring_fd() registers the file descriptor of the ring.
+.BR io_uring_register_ring_fd (3)
+registers the file descriptor of the ring.
 
 Whenever
 .BR io_uring_enter (2)
@@ -32,6 +32,8 @@ If an application using liburing is threaded, then an application should call
 this function to register the ring descriptor when a ring is set up. See NOTES
 for restrictions when a ring is shared.
 
+Available since kernel 5.18.
+
 .SH NOTES
 When the ring descriptor is registered, it is stored internally in the
 .I struct io_uring
@@ -42,7 +44,8 @@ ring fd.
 .SH RETURN VALUE
 Returns 1 on success, indicating that one file descriptor was registered,
 or
-.B -errno
+.BR -errno
 on error.
 .SH SEE ALSO
-.BR io_uring_unregister_ring_fd (3), io_uring_register_files (3)
+.BR io_uring_unregister_ring_fd (3),
+.BR io_uring_register_files (3)

@@ -15,8 +15,10 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #include "liburing.h"
+#include "helpers.h"
 
 static int no_connect;
 static unsigned short use_port;
@@ -87,10 +89,11 @@ static int listen_on_socket(int fd)
 {
 	struct sockaddr_in addr;
 	int ret;
+	socklen_t len = sizeof(addr);
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = use_port;
+	addr.sin_port = 0; // Let the OS pick a free port
 	addr.sin_addr.s_addr = use_addr;
 
 	ret = bind(fd, (struct sockaddr*)&addr, sizeof(addr));
@@ -98,6 +101,12 @@ static int listen_on_socket(int fd)
 		perror("bind()");
 		return -1;
 	}
+
+	if (getsockname(fd, (struct sockaddr*)&addr, &len) == -1) {
+		perror("getsockname()");
+		return -1;
+	}
+	use_port = addr.sin_port;
 
 	ret = listen(fd, 128);
 	if (ret == -1) {
@@ -131,7 +140,7 @@ static int configure_connect(int fd, struct sockaddr_in* addr)
 	return ret;
 }
 
-static int connect_socket(struct io_uring *ring, int fd, int *code)
+static int connect_socket(struct io_uring *ring, int fd, int *code, int async)
 {
 	struct sockaddr_in addr;
 	int ret, res;
@@ -148,6 +157,8 @@ static int connect_socket(struct io_uring *ring, int fd, int *code)
 	}
 
 	io_uring_prep_connect(sqe, fd, (struct sockaddr*)&addr, sizeof(addr));
+	if (async)
+		sqe->flags |= IOSQE_ASYNC;
 	sqe->user_data = 1;
 
 	ret = submit_and_wait(ring, &res);
@@ -175,16 +186,55 @@ static int connect_socket(struct io_uring *ring, int fd, int *code)
 	return 0;
 }
 
+static int block_port(int *port)
+{
+	int fd;
+	struct sockaddr_in addr;
+	socklen_t len = sizeof(addr);
+
+	fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (fd == -1) {
+		perror("socket()");
+		return -1;
+	}
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	addr.sin_port = 0;
+
+	if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+		perror("bind()");
+		close(fd);
+		return -1;
+	}
+
+	if (getsockname(fd, (struct sockaddr*)&addr, &len) == -1) {
+		perror("getsockname()");
+		close(fd);
+		return -1;
+	}
+
+	*port = addr.sin_port;
+	return fd;
+}
+
 static int test_connect_with_no_peer(struct io_uring *ring)
 {
-	int connect_fd;
+	int connect_fd, block_fd;
 	int ret, code;
+	int port;
+
+	block_fd = block_port(&port);
+	if (block_fd < 0)
+		return block_fd;
+	use_port = port;
 
 	connect_fd = create_socket();
 	if (connect_fd == -1)
-		return -1;
+		goto err_block;
 
-	ret = connect_socket(ring, connect_fd, &code);
+	ret = connect_socket(ring, connect_fd, &code, 0);
 	if (ret == -1)
 		goto err;
 
@@ -200,14 +250,17 @@ static int test_connect_with_no_peer(struct io_uring *ring)
 
 out:
 	close(connect_fd);
+	close(block_fd);
 	return 0;
 
 err:
 	close(connect_fd);
+err_block:
+	close(block_fd);
 	return -1;
 }
 
-static int test_connect(struct io_uring *ring)
+static int test_connect(struct io_uring *ring, int async)
 {
 	int accept_fd;
 	int connect_fd;
@@ -225,7 +278,7 @@ static int test_connect(struct io_uring *ring)
 	if (connect_fd == -1)
 		goto err1;
 
-	ret = connect_socket(ring, connect_fd, &code);
+	ret = connect_socket(ring, connect_fd, &code, async);
 	if (ret == -1)
 		goto err2;
 
@@ -253,8 +306,16 @@ static int test_connect_timeout(struct io_uring *ring)
 	int accept_fd = -1;
 	int ret, code;
 	struct sockaddr_in addr;
+	socklen_t len = sizeof(addr);
 	struct io_uring_sqe *sqe;
 	struct __kernel_timespec ts = {.tv_sec = 0, .tv_nsec = 100000};
+	struct stat sb;
+
+	/*
+	 * Test reliably fails if syncookies isn't enabled
+	 */
+	if (stat("/proc/sys/net/ipv4/tcp_syncookies", &sb) < 0)
+		return T_EXIT_SKIP;
 
 	connect_fd[0] = create_socket();
 	if (connect_fd[0] == -1)
@@ -268,17 +329,28 @@ static int test_connect_timeout(struct io_uring *ring)
 	if (accept_fd == -1)
 		goto err;
 
-	if (configure_connect(connect_fd[0], &addr) == -1)
-		goto err;
-
-	if (configure_connect(connect_fd[1], &addr) == -1)
-		goto err;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = 0; // Let the OS pick a free port
+	addr.sin_addr.s_addr = use_addr;
 
 	ret = bind(accept_fd, (struct sockaddr*)&addr, sizeof(addr));
 	if (ret == -1) {
 		perror("bind()");
 		goto err;
 	}
+
+	if (getsockname(accept_fd, (struct sockaddr*)&addr, &len) == -1) {
+		perror("getsockname()");
+		goto err;
+	}
+	use_port = addr.sin_port;
+
+	if (configure_connect(connect_fd[0], &addr) == -1)
+		goto err;
+
+	if (configure_connect(connect_fd[1], &addr) == -1)
+		goto err;
 
 	ret = listen(accept_fd, 0);  // no backlog in order to block connect_fd[1]
 	if (ret == -1) {
@@ -287,7 +359,7 @@ static int test_connect_timeout(struct io_uring *ring)
 	}
 
 	// We first connect with one client socket in order to fill the accept queue.
-	ret = connect_socket(ring, connect_fd[0], &code);
+	ret = connect_socket(ring, connect_fd[0], &code, 0);
 	if (ret == -1 || code != 0) {
 		fprintf(stderr, "unable to connect\n");
 		goto err;
@@ -354,45 +426,79 @@ err:
 	return -1;
 }
 
-int main(int argc, char *argv[])
+static int test(int flags)
 {
 	struct io_uring ring;
 	int ret;
 
-	if (argc > 1)
-		return 0;
-
-	ret = io_uring_queue_init(8, &ring, 0);
+	ret = io_uring_queue_init(8, &ring, flags);
+	if (ret == -EINVAL)
+		return T_EXIT_SKIP;
 	if (ret) {
-		fprintf(stderr, "io_uring_queue_setup() = %d\n", ret);
-		return 1;
+		fprintf(stderr, "io_uring_queue_init() = %d\n", ret);
+		return T_EXIT_FAIL;
 	}
 
-	srand(getpid());
-	use_port = (rand() % 61440) + 4096;
-	use_port = htons(use_port);
 	use_addr = inet_addr("127.0.0.1");
 
 	ret = test_connect_with_no_peer(&ring);
 	if (ret == -1) {
 		fprintf(stderr, "test_connect_with_no_peer(): failed\n");
-		return 1;
+		return T_EXIT_FAIL;
 	}
 	if (no_connect)
-		return 0;
+		return T_EXIT_SKIP;
 
-	ret = test_connect(&ring);
+	ret = test_connect(&ring, 0);
 	if (ret == -1) {
 		fprintf(stderr, "test_connect(): failed\n");
-		return 1;
+		return T_EXIT_FAIL;
+	}
+
+	ret = test_connect(&ring, 1);
+	if (ret == -1) {
+		fprintf(stderr, "test_connect(): failed\n");
+		return T_EXIT_FAIL;
 	}
 
 	ret = test_connect_timeout(&ring);
 	if (ret == -1) {
 		fprintf(stderr, "test_connect_timeout(): failed\n");
-		return 1;
+		return T_EXIT_FAIL;
 	}
 
 	io_uring_queue_exit(&ring);
-	return 0;
+	return T_EXIT_PASS;
+}
+
+int main(int argc, char *argv[])
+{
+	bool any_passed = false;
+	int ret;
+
+	if (argc > 1)
+		return T_EXIT_SKIP;
+
+	ret = test(0);
+	any_passed |= ret == T_EXIT_PASS;
+	if (ret == T_EXIT_FAIL) {
+		fprintf(stderr, "test 0 failed\n");
+		return T_EXIT_FAIL;
+	}
+
+	ret = test(IORING_SETUP_SQPOLL);
+	any_passed |= ret == T_EXIT_PASS;
+	if (ret == T_EXIT_FAIL) {
+		fprintf(stderr, "test SQPOLL failed\n");
+		return T_EXIT_FAIL;
+	}
+
+	ret = test(IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN);
+	any_passed |= ret == T_EXIT_PASS;
+	if (ret == T_EXIT_FAIL) {
+		fprintf(stderr, "test DEFER failed\n");
+		return T_EXIT_FAIL;
+	}
+
+	return any_passed ? T_EXIT_PASS : T_EXIT_SKIP;
 }

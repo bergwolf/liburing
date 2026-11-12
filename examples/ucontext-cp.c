@@ -68,23 +68,8 @@ DEFINE_AWAIT_OP(readv)
 DEFINE_AWAIT_OP(writev)
 #undef DEFINE_AWAIT_OP
 
-int await_poll(async_context *pctx, int fd, short poll_mask) {
-	struct io_uring_sqe *sqe = io_uring_get_sqe(pctx->ring);
-	struct io_uring_cqe *cqe;
-	if (!sqe)
-		return -1;
-
-	io_uring_prep_poll_add(sqe, fd, poll_mask);
-	io_uring_sqe_set_data(sqe, pctx);
-	swapcontext(&pctx->ctx_fnew, &pctx->ctx_main);
-	io_uring_peek_cqe(pctx->ring, &cqe);
-	assert(cqe);
-	io_uring_cqe_seen(pctx->ring, cqe);
-
-	return cqe->res;
-}
-
-int await_delay(async_context *pctx, time_t seconds) {
+static int await_delay(async_context *pctx, time_t seconds)
+{
 	struct io_uring_sqe *sqe = io_uring_get_sqe(pctx->ring);
 	struct io_uring_cqe *cqe;
 	struct __kernel_timespec ts = {
@@ -179,10 +164,13 @@ static void copy_file_wrapper(arguments_bundle *pbundle)
 	free(iov.iov_base);
 	close(pbundle->infd);
 	close(pbundle->outfd);
-	free(pbundle->pctx->stack_buf);
-	free(pbundle->pctx);
 	free(pbundle);
 
+	/*
+	 * stack_buf is the stack we're currently running on and pctx holds
+	 * the contexts swapcontext() is about to use, so they can't be freed
+	 * here. main() reclaims them once this coroutine is done.
+	 */
 	swapcontext(&pctx->ctx_fnew, &pctx->ctx_main);
 }
 
@@ -258,10 +246,17 @@ int main(int argc, char *argv[])
 		}
 
 		async_context *pctx = io_uring_cqe_get_data(cqe);
+		int prev_done = success + failure;
 
 		if (swapcontext(&pctx->ctx_main, &pctx->ctx_fnew)) {
 			perror("swapcontext");
 			return 1;
+		}
+
+		/* coroutine finished, its stack and context are now safe to free */
+		if (success + failure != prev_done) {
+			free(pctx->stack_buf);
+			free(pctx);
 		}
 	}
 
